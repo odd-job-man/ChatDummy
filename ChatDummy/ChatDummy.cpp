@@ -20,6 +20,7 @@ BOOL ChatDummy::Start()
 
 void ChatDummy::OnRecv(ULONGLONG id, SmartPacket& sp)
 {
+	int a;
 	g_msgQ.Enqueue(g_jobPool.Alloc(SERVERTYPE::CHAT, JOBTYPE::RECV_MESSAGE, id, sp.GetPacket()));
 }
 
