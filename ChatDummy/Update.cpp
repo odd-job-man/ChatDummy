@@ -94,7 +94,7 @@ void UpdateLoop(int tickPerFrame, int maxSession, int randConnect, int randDisco
 	while (!g_bShutDown)
 	{
 		Update();
-		//g_time = timeGetTime();
+		g_time = timeGetTime();
 
 		if (g_time - g_timeForSecond >= 1000)
 		{
