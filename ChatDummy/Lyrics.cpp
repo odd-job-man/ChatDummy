@@ -23,7 +23,7 @@ void LyRics::Init(const WCHAR* pFileName)
 		__debugbreak();
 
 	WCHAR* pTemp = pArr;
-	WCHAR* cnt = pArr;
+	WCHAR* cnt = pArr + 1;
 	int numOfLyrics = 0;
 
 	int max = 0;

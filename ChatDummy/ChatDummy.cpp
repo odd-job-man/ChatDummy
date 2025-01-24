@@ -5,8 +5,8 @@
 extern CLockFreeQueue<RecvJob*> g_msgQ;
 extern CTlsObjectPool<RecvJob, true> g_jobPool;
 
-ChatDummy::ChatDummy(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconInterval, const WCHAR* pConfigFile)
-	:NetClient{ bAutoReconnect,autoReconnectCnt,autoReconInterval,pConfigFile }, pConfigFile_{ pConfigFile }
+ChatDummy::ChatDummy(BOOL bAutoReconnect, LONG autoReconnectCnt, LONG autoReconnectInterval, BOOL bUseMemberSockAddrIn, WCHAR* pIP, USHORT port, DWORD iocpWorkerThreadNum, DWORD cunCurrentThreadNum, LONG maxSession, BYTE packetCode, BYTE packetFixedKey)
+	:NetClient{ bAutoReconnect,autoReconnectCnt,autoReconnectInterval,bUseMemberSockAddrIn,pIP,port,iocpWorkerThreadNum,cunCurrentThreadNum,maxSession,packetCode,packetFixedKey }
 {
 }
 
@@ -20,7 +20,7 @@ BOOL ChatDummy::Start()
 
 void ChatDummy::OnRecv(ULONGLONG id, SmartPacket& sp)
 {
-	int a;
+	sp->IncreaseRefCnt();
 	g_msgQ.Enqueue(g_jobPool.Alloc(SERVERTYPE::CHAT, JOBTYPE::RECV_MESSAGE, id, sp.GetPacket()));
 }
 

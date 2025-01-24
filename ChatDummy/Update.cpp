@@ -11,7 +11,8 @@
 #include "MemoryPool.h"
 #include "CommonProtocol.h"
 #include "Lyrics.h"
-
+#include "Monitor.h"
+#include "MakePacket.h"
 #pragma comment(lib,"MemoryPool.lib")
 
 extern LoginDummy* g_pLoginDummy;
@@ -19,9 +20,14 @@ extern ChatDummy* g_pChatDummy;
 extern CLockFreeQueue<RecvJob*> g_msgQ;
 extern CTlsObjectPool<RecvJob, true> g_jobPool;
 
+int g_maxSession;
 int g_needToTryConnect;
+
+int g_loginConnectTotal;
 int g_loginDownClient;
 int g_loginConnectFail;
+
+int g_chatConnectTotal;
 int g_chatDownClient;
 int g_chatConnectFail;
 
@@ -35,28 +41,30 @@ MEMORYPOOL g_playerPool;
 
 std::unordered_map<ULONGLONG, Player*> g_loginPlayerMap;
 std::queue<Player*> g_moveQ;
-std::unordered_map<ULONGLONG, Player*> g_chatPlayerMap;
+std::unordered_map<ULONGLONG, Player*> g_chatConnectPlayerMap;
+std::unordered_map<ULONGLONG, Player*> g_chatLoginPlayerMap;
+std::stack<const AccountInfo*> g_NonConnectedStack;
 
-BOOL g_bShutDown = FALSE;
-int g_oldFrameTick;
-int g_fpsCheck;
-int g_time;
-int g_fps;
+bool g_bShutDown;
+int g_loopNum;
 int g_first;
 int g_timeForSecond;
-
 int g_ContentsRand;
+
+// 같은 ChatMap안에서 
+int g_ChatConnectNum;
+int g_ChatLoginNum;
 
 DWORD g_rttMax;
 DWORD g_rttNum;
 ULONGLONG g_rttTotal;
 float g_rttAvg;
 
+bool g_bPlay;
+bool g_bConnectStop;
+bool g_bDuplicateLoginOn;
+bool g_bAttackOn;
 
-__forceinline void Monitor()
-{
-	printf("fps : %d\n", g_fps);
-}
 
 // 평균은 1초에 한번구함
 __forceinline void CaculateRTT(DWORD curRecvTime, DWORD lastSendTime)
@@ -71,13 +79,22 @@ void RecvChatJob(RecvJob* pJob);
 void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID);
 void SendRandomChatMessage(Player* pPlayer);
 
-void UpdateLoop(int tickPerFrame, int maxSession, int randConnect, int randDisconnect, int randContents, int delayAction, int delayLogin, const WCHAR* pIDConfigFile, const WCHAR* pLyricsConfigFile)
+
+void UpdateLoop(int maxSession, int randConnect, int randDisconnect, int randContents, int delayAction, int delayLogin, const WCHAR* pIDConfigFile, const WCHAR* pLyricsConfigFile)
 {
+	g_bPlay = true;
+	g_bConnectStop = g_bDuplicateLoginOn = g_bAttackOn = false;
+
 	AccountInfo::Init(pIDConfigFile);
 	LyRics::Init(pLyricsConfigFile);
 
+	for (int i = 0; i < maxSession; ++i)
+	{
+		g_NonConnectedStack.push(AccountInfo::Alloc());
+	}
+
 	g_playerPool = CreateMemoryPool(sizeof(Player), Player::MAX_PLAYER_NUM);
-	g_needToTryConnect = maxSession;
+	g_maxSession = g_needToTryConnect = maxSession;
 	g_randConnect = randConnect;
 	g_randDisconnect = randDisconnect;
 	g_randContents = randContents;
@@ -86,34 +103,37 @@ void UpdateLoop(int tickPerFrame, int maxSession, int randConnect, int randDisco
 
 	g_first = timeGetTime();
 	g_timeForSecond = g_first;
-	g_oldFrameTick = g_first;
-	g_time = g_oldFrameTick;
-	g_fps = 0;
-	g_fpsCheck = g_oldFrameTick;
+	g_loopNum = 0;
+
 
 	while (!g_bShutDown)
 	{
 		Update();
-		g_time = timeGetTime();
-
-		if (g_time - g_timeForSecond >= 1000)
+		if (timeGetTime() - g_timeForSecond >= 1000)
 		{
-			Monitor();
+			//Monitor();
+			printf("%d\n", g_loopNum);
 			g_timeForSecond += 1000;
-			g_fps = 0;
+			g_loopNum = 0;
+
+			// S : Stop
+			//if (GetAsyncKeyState() & 0x0001)
+			//{
+
+			//}
+			//Q : ShutDown
+			if (GetAsyncKeyState(0x51) & 0x0001)
+			{
+				g_bShutDown = true;
+			}
 		}
 
-		//if (g_time - g_oldFrameTick >= tickPerFrame)
-		//{
-		//	g_oldFrameTick = g_time - ((g_time - g_first) % tickPerFrame);
-		//	continue;
-		//}
 
-		//Sleep(tickPerFrame - (g_time - g_oldFrameTick));
-		//g_oldFrameTick += tickPerFrame;
-		//Sleep(0);
-		++g_fps;
+		Sleep(3);
+		++g_loopNum;
 	}
+
+	// 셧다운 절차
 }
 
 void Update()
@@ -145,15 +165,20 @@ void Update()
 	}
 
 	// 더미에 설정된 확률대로 Connect 시도
+
 	int temp = g_needToTryConnect;
-	for (int i = 0; i < temp; ++i)
+	if (!g_bConnectStop)
 	{
-		if (rand() % 100 + 1 <= g_randConnect)
+		for (int i = 0; i < temp; ++i)
 		{
-			g_pLoginDummy->Connect(false, &g_pLoginDummy->sockAddr_);
-			--g_needToTryConnect;
+			if (rand() % 100 + 1 <= g_randConnect)
+			{
+				g_pLoginDummy->Connect(false, &g_pLoginDummy->sockAddr_);
+				--g_needToTryConnect;
+			}
 		}
 	}
+
 
 	for (auto pair : g_loginPlayerMap)
 	{
@@ -171,8 +196,7 @@ void Update()
 
 			// delay login 만큼의 시간이 흐르면 로그인 패킷 보내기
 			SmartPacket sp = PACKET_ALLOC(Net);
-			*sp << (WORD)en_PACKET_CS_LOGIN_REQ_LOGIN << pPlayer->pInfo_->accountNo;
-			sp->PutData((char*)pPlayer->pInfo_->SessionKey, Player::SESSION_KEY_LEN);
+			MAKE_CS_LOGIN_REQ_LOGIN(pPlayer->pInfo_->accountNo, pPlayer->pInfo_->SessionKey, sp);
 			g_pLoginDummy->SendPacket(pPlayer->sessionId_, sp);
 			pPlayer->lastSendTime_ = timeGetTime();
 			pPlayer->state_ = STATE::CS_LOGIN_REQ_LOGIN_SENT;
@@ -190,35 +214,36 @@ void Update()
 
 	}
 
-	for (auto pair : g_chatPlayerMap)
+	ULONGLONG curTime = timeGetTime();
+	for (auto pair : g_chatConnectPlayerMap)
+	{
+		Player* pPlayer = pair.second;
+		if (pPlayer->state_ == STATE::CS_CHAT_REQ_LOGIN_SENT)
+			continue;
+
+		if (pPlayer->state_ != STATE::CHAT_CONNECT_SUCCESS)
+			__debugbreak();
+
+		if (curTime < pPlayer->lastRecvTime_ + g_delayLogin)
+			continue;
+
+		// delay login 만큼의 시간이 흐르면 로그인 패킷 보내기
+		SmartPacket sp = PACKET_ALLOC(Net);
+		MAKE_CS_CHAT_REQ_LOGIN(pPlayer->pInfo_->accountNo, pPlayer->pInfo_->ID, pPlayer->pInfo_->Nick, pPlayer->pInfo_->SessionKey, sp);
+		g_pChatDummy->SendPacket(pPlayer->sessionId_, sp);
+		pPlayer->lastSendTime_ = timeGetTime();
+		pPlayer->state_ = STATE::CS_CHAT_REQ_LOGIN_SENT;
+	}
+
+	curTime = timeGetTime();
+	for (auto pair : g_chatLoginPlayerMap)
 	{
 		Player* pPlayer = pair.second;
 		if (pPlayer->bDisconnectCalled_)
 			continue;
 
-		ULONGLONG curTime = timeGetTime();
 		switch (pPlayer->state_)
 		{
-		case STATE::CHAT_CONNECT_TRY:
-			break;
-
-		case STATE::CHAT_CONNECT_SUCCESS:
-		{
-			if (curTime < pPlayer->lastRecvTime_ + g_delayLogin)
-				break;
-
-			// delay login 만큼의 시간이 흐르면 로그인 패킷 보내기
-			SmartPacket sp = PACKET_ALLOC(Net);
-			*sp << (WORD)en_PACKET_CS_CHAT_REQ_LOGIN << pPlayer->pInfo_->accountNo;
-			sp->PutData((char*)pPlayer->pInfo_->ID, sizeof(WCHAR) * Player::ID_LEN);
-			sp->PutData((char*)pPlayer->pInfo_->Nick, sizeof(WCHAR) * Player::SESSION_KEY_LEN);
-			sp->PutData((char*)pPlayer->pInfo_->SessionKey, Player::SESSION_KEY_LEN);
-			g_pChatDummy->SendPacket(pPlayer->sessionId_, sp);
-			pPlayer->lastSendTime_ = timeGetTime();
-			pPlayer->state_ = STATE::CS_CHAT_REQ_LOGIN_SENT;
-			break;
-		}
-
 		case STATE::CS_CHAT_RES_LOGIN_RECV:
 		case STATE::CS_CHAT_RES_SECTOR_MOVE_RECV:
 		case STATE::CS_CHAT_RES_MESSAGE_RECV:
@@ -249,6 +274,7 @@ void Update()
 		case STATE::CS_CHAT_REQ_SECTOR_MOVE_SENT:
 		case STATE::CS_CHAT_REQ_MESSAGE_SENT:
 		case STATE::CS_CHAT_REQ_HEARTBEAT_SENT:
+		case STATE::CHAT_TRY_DISCONNECT:
 			break;
 
 		default:
@@ -278,11 +304,14 @@ void RecvLoginJob(RecvJob* pJob)
 		pPlayer->sessionId_ = pJob->sessionId_;
 		pPlayer->lastRecvTime_ = timeGetTime();
 		pPlayer->state_ = STATE::LOGIN_CONNECT_SUCCESS;
+		pPlayer->pInfo_ = g_NonConnectedStack.top();
 		pPlayer->bDisconnectCalled_ = false;
-		pPlayer->pInfo_ = AccountInfo::Alloc();
 		pPlayer->bAuthAtLoginServer_ = false;
 		pPlayer->bWillSendmessage_ = false;
+
+		g_NonConnectedStack.pop();
 		g_loginPlayerMap.insert(std::make_pair(pJob->sessionId_, pPlayer));
+		++g_loginConnectTotal;
 		break;
 	}
 	case JOBTYPE::RECV_MESSAGE:
@@ -341,22 +370,27 @@ void RecvLoginJob(RecvJob* pJob)
 		{
 			pPlayer->state_ = STATE::CHAT_CONNECT_TRY;
 			g_moveQ.push(pPlayer);
-
-			g_loginPlayerMap.erase(iter);
 			g_pChatDummy->Connect(false, &pPlayer->sockAddr_);
-			break;
 		}
-
-		// 로그인 인증 성공 메시지를 서버에게서 받지 못햇는데 연결이 끊긴경우 
-		++g_loginDownClient;
+		else // 로그인 인증 성공 메시지를 서버에게서 받지 못햇는데 연결이 끊긴경우
+		{
+			++g_loginDownClient;
+			++g_needToTryConnect;
+			g_NonConnectedStack.push(pPlayer->pInfo_);
+			RetMemoryToPool(g_playerPool, pPlayer);
+		}
+		g_loginPlayerMap.erase(iter);
 		break;
 	}
 	case JOBTYPE::CONNECT_FAIL:
 		++g_loginConnectFail;
 		break;
 	case JOBTYPE::ALL_RECONNECT_FAIL:
+	{
 		++g_needToTryConnect;
+		g_moveQ.pop();
 		break;
+	}
 	default:
 		__debugbreak();
 		break;
@@ -380,7 +414,8 @@ void RecvChatJob(RecvJob* pJob)
 		pPlayer->bAuthAtChatServer_ = false;
 		pPlayer->bRegisterAtSector_ = false;
 		pPlayer->bWillSendmessage_ = false;
-		g_chatPlayerMap.insert(std::make_pair(pJob->sessionId_, pPlayer));
+		g_chatConnectPlayerMap.insert(std::make_pair(pJob->sessionId_, pPlayer));
+		++g_chatConnectTotal;
 		break;
 	}
 	case JOBTYPE::RECV_MESSAGE:
@@ -390,14 +425,21 @@ void RecvChatJob(RecvJob* pJob)
 	}
 	case JOBTYPE::ON_RELEASE:
 	{
-		auto iter = g_chatPlayerMap.find(pJob->sessionId_);
+		auto iter = g_chatLoginPlayerMap.find(pJob->sessionId_);
+		if (iter == g_chatLoginPlayerMap.end())
+		{
+			iter = g_chatConnectPlayerMap.find(pJob->sessionId_);
+		}
+
 		Player* pPlayer = iter->second;
 
 		if (!pPlayer->bDisconnectCalled_ || pPlayer->state_ != STATE::CHAT_TRY_DISCONNECT) // 성공메시지를 수신해서 클라에서 정상적으로 Disconnect 한 경우
 			++g_chatDownClient;
 
-		g_chatPlayerMap.erase(iter);
 		++g_needToTryConnect;
+		g_chatLoginPlayerMap.erase(iter);
+		g_NonConnectedStack.push(pPlayer->pInfo_);
+		RetMemoryToPool(g_playerPool, pPlayer);
 		break;
 	}
 	case JOBTYPE::CONNECT_FAIL:
@@ -405,9 +447,14 @@ void RecvChatJob(RecvJob* pJob)
 		break;
 
 	case JOBTYPE::ALL_RECONNECT_FAIL:
-		g_moveQ.pop();
+	{
 		++g_needToTryConnect;
+		Player* pPlayer = g_moveQ.front();
+		g_moveQ.pop();
+		g_NonConnectedStack.push(pPlayer->pInfo_);
+		RetMemoryToPool(g_playerPool, pPlayer);
 		break;
+	}
 	default:
 		__debugbreak();
 		break;
@@ -416,9 +463,7 @@ void RecvChatJob(RecvJob* pJob)
 
 void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 {
-	Player* pPlayer = g_chatPlayerMap.find(sessionID)->second;
-	pPlayer->lastRecvTime_ = timeGetTime();
-	CaculateRTT(pPlayer->lastRecvTime_, pPlayer->lastSendTime_);
+	Player* pPlayer = nullptr; 
 
 	WORD type;
 	*pPacket >> type;
@@ -426,6 +471,13 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 	{
 	case en_PACKET_CS_CHAT_RES_LOGIN:
 	{
+		pPlayer = g_chatConnectPlayerMap.find(sessionID)->second;
+
+		if (pPlayer->state_ == STATE::CHAT_TRY_DISCONNECT)
+			break;
+
+		pPlayer->lastRecvTime_ = timeGetTime();
+		CaculateRTT(pPlayer->lastRecvTime_, pPlayer->lastSendTime_);
 		if (pPlayer->state_ != STATE::CS_CHAT_REQ_LOGIN_SENT)
 		{
 			LOG(L"RECV_PACKET_ERROR", ERR, TEXTFILE, L"Previous Send Message Is Not CS_CHAT_REQ_LOGIN");
@@ -444,10 +496,19 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 
 		pPlayer->state_ = STATE::CS_CHAT_RES_LOGIN_RECV;
 		pPlayer->bAuthAtChatServer_ = true;
+		g_chatConnectPlayerMap.erase(sessionID);
+		g_chatLoginPlayerMap.insert(std::make_pair(sessionID, pPlayer));
 		break;
 	}
 	case en_PACKET_CS_CHAT_RES_SECTOR_MOVE:
 	{
+		pPlayer = g_chatLoginPlayerMap.find(sessionID)->second;
+
+		if (pPlayer->state_ == STATE::CHAT_TRY_DISCONNECT)
+			break;
+
+		pPlayer->lastRecvTime_ = timeGetTime();
+		CaculateRTT(pPlayer->lastRecvTime_, pPlayer->lastSendTime_);
 		if (pPlayer->state_ != STATE::CS_CHAT_REQ_SECTOR_MOVE_SENT)
 		{
 			LOG(L"RECV_PACKET_ERROR", ERR, TEXTFILE, L"Previous Send Message Is Not CS_CHAT_REQ_SECTOR_MOVE");
@@ -462,12 +523,16 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 			__debugbreak();
 
 		pPlayer->state_ = STATE::CS_CHAT_RES_SECTOR_MOVE_RECV;
-		pPlayer->bRegisterAtSector_ = true;
 		break;
 	}
 
 	case en_PACKET_CS_CHAT_RES_MESSAGE:
 	{
+		pPlayer = g_chatLoginPlayerMap.find(sessionID)->second;
+
+		if (pPlayer->state_ == STATE::CHAT_TRY_DISCONNECT)
+			break;
+
 		if (!pPlayer->bRegisterAtSector_)
 		{
 			LOG(L"RECV_PACKET_ERROR", ERR, TEXTFILE, L"Player Is Not Registered At Sector But Chat Message Recved");
@@ -484,6 +549,8 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 
 		if (accountNo == pPlayer->pInfo_->accountNo) // 본인이 보낸 메시지를 본인이 받은경우(검증대상)
 		{
+			pPlayer->lastRecvTime_ = timeGetTime();
+			CaculateRTT(pPlayer->lastRecvTime_, pPlayer->lastSendTime_);
 			// 본인이 보낸 메시지를 본인이 받앗는데 이전에 보낸 메시지가 채팅메시지 요청이 아닐때
 			if (pPlayer->state_ != STATE::CS_CHAT_REQ_MESSAGE_SENT)
 			{
@@ -520,8 +587,12 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 				__debugbreak();
 
 			pPlayer->state_ = STATE::CS_CHAT_RES_MESSAGE_RECV;
+			break;
 		}
-		break;
+		else
+		{
+			return;
+		}
 	}
 	default:
 		__debugbreak();
@@ -542,19 +613,18 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 void SendRandomChatMessage(Player* pPlayer)
 {
 	SmartPacket sp = PACKET_ALLOC(Net);
-	if (!pPlayer->bRegisterAtSector_ || rand() % 2 == 0) // 섹터에 등록이 안되잇으면 무조건 섹터이동 보내기, 그게아니면 확률적결정
+	if (!pPlayer->bRegisterAtSector_ || rand() % 5 < 1) // 섹터에 등록이 안되잇으면 무조건 섹터이동 보내기, 그게아니면 확률적결정
 	{
 		pPlayer->sectorX_ = rand() % 49 + 1;
 		pPlayer->sectorY_ = rand() % 49 + 1;
-		*sp << (WORD)en_PACKET_CS_CHAT_REQ_SECTOR_MOVE << pPlayer->pInfo_->accountNo << pPlayer->sectorX_ << pPlayer->sectorY_;
+		MAKE_CS_CHAT_REQ_SECTOR_MOVE(pPlayer->pInfo_->accountNo, pPlayer->sectorX_, pPlayer->sectorY_, sp);
 		pPlayer->state_ = STATE::CS_CHAT_REQ_SECTOR_MOVE_SENT;
+		pPlayer->bRegisterAtSector_ = true; // 여기서 미리등록해야 그사이에 RES_MESSAGE 다른 유저가 보낸 메시가 왓을때 섹터에는 등록이 되어있지 않은데 채팅메시지를 받앗다는 논리적 오류가 안생김
 	}
 	else
 	{
 		const LyRics* pLR = pPlayer->pLastSentChat = LyRics::Get(); // 나중에 본인에게 핑퐁올때 검증하려면 저장해둬야함
-		*sp << (WORD)en_PACKET_CS_CHAT_REQ_MESSAGE << pPlayer->pInfo_->accountNo;
-		*sp << (WORD)(sizeof(WCHAR) * pLR->len);
-		sp->PutData((char*)pLR->pLyrics, sizeof(WCHAR) * pLR->len);
+		MAKE_CS_CHAT_REQ_MESSAGE(pPlayer->pInfo_->accountNo, pLR->len, pLR->pLyrics, sp);
 		pPlayer->state_ = STATE::CS_CHAT_REQ_MESSAGE_SENT;
 	}
 	g_pChatDummy->SendPacket(pPlayer->sessionId_, sp);

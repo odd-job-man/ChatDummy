@@ -15,7 +15,8 @@ struct NetClientSession;
 class NetClient
 {
 public:
-	NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFileName);
+	NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, BOOL bUseMemberSockAddrIn, const WCHAR* pIP, const USHORT port, const DWORD iocpWorkerThreadNum, const DWORD cunCurrentThreadNum,
+		const LONG maxSession, const BYTE packetCode, const BYTE packetFixedKey);
 	virtual ~NetClient();
 	void InitialConnect(SOCKADDR_IN* pSockAddrIn);
 	bool Connect(bool bRetry, SOCKADDR_IN* pSockAddrIn);

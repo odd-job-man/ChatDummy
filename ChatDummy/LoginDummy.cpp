@@ -9,10 +9,15 @@
 CLockFreeQueue<RecvJob*> g_msgQ;
 CTlsObjectPool<RecvJob, true> g_jobPool;
 
-LoginDummy::LoginDummy(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFile)
-	:NetClient{ bAutoReconnect,autoReconnectCnt,autoReconnectInterval,pConfigFile }, pConfigFile_{ pConfigFile }
+LoginDummy::LoginDummy(BOOL bAutoReconnect, LONG autoReconnectCnt, LONG autoReconnectInterval, BOOL bUseMemberSockAddrIn, WCHAR* pIP, USHORT port, DWORD iocpWorkerThreadNum, DWORD cuncurrentThreadNum, LONG maxSession, BYTE packetCode, BYTE packetFixedKey)
+	:NetClient{ bAutoReconnect,autoReconnectCnt,autoReconnectInterval,bUseMemberSockAddrIn,pIP,port,iocpWorkerThreadNum,cuncurrentThreadNum,maxSession,packetCode,packetFixedKey }
 {
 }
+
+//LoginDummy::LoginDummy(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFile)
+//	:NetClient{ bAutoReconnect,autoReconnectCnt,autoReconnectInterval,pConfigFile }, pConfigFile_{ pConfigFile }
+//{
+//}
 
 BOOL LoginDummy::Start()
 {

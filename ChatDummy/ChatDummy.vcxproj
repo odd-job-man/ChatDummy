@@ -136,6 +136,8 @@
     <ClCompile Include="HMonitor.cpp" />
     <ClCompile Include="Lyrics.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="MakePacket.cpp" />
+    <ClCompile Include="Monitor.cpp" />
     <ClCompile Include="NetClient.cpp" />
     <ClCompile Include="NetClientSession.cpp" />
     <ClCompile Include="RingBuffer.cpp" />
@@ -159,7 +161,9 @@
     <ClInclude Include="HMonitor.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="Lyrics.h" />
+    <ClInclude Include="MakePacket.h" />
     <ClInclude Include="MemoryPool.h" />
+    <ClInclude Include="Monitor.h" />
     <ClInclude Include="Monitorable.h" />
     <ClInclude Include="MYOVERLAPPED.h" />
     <ClInclude Include="NetClient.h" />

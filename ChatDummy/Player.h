@@ -31,5 +31,4 @@ struct Player
 	WORD sectorY_;
 	const LyRics* pLastSentChat;
 	SOCKADDR_IN sockAddr_;
-
 };

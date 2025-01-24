@@ -31,8 +31,11 @@ void NetClient::ConnectProc(NetClientSession* pSession)
 	InterlockedIncrement(&pSession->refCnt_);
 	InterlockedAnd(&pSession->refCnt_, ~NetClientSession::RELEASE_FLAG);
 
-	setsockopt(pSession->sock_, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
+	if (0 > setsockopt(pSession->sock_, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0))
+		__debugbreak();
 
+	//SetLinger(pSession->sock_);
+	//SetZeroCopy(pSession->sock_);
 	pSession->Init(InterlockedIncrement(&ullIdCounter_) - 1, (short)(pSession - pSessionArr_));
 
 	OnConnect(pSession->id_);
@@ -195,8 +198,8 @@ unsigned __stdcall NetClient::IOCPWorkerThread(LPVOID arg)
 bool NetClient::SetLinger(SOCKET sock)
 {
 	linger linger;
-	linger.l_linger = 0;
 	linger.l_onoff = 1;
+	linger.l_linger = 0;
 	return setsockopt(sock, SOL_SOCKET, SO_LINGER, (char*)&linger, sizeof(linger)) == 0;
 }
 
@@ -229,13 +232,12 @@ bool NetClient::SetClientBind(SOCKET sock)
 	return true;
 }
 
-NetClient::NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFileName)
-	:bAutoReconnect_{ bAutoReconnect }, autoReconnectCnt_{ autoReconnectCnt }, autoReconnectInterval_{ autoReconnectInterval }
+NetClient::NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, BOOL bUseMemberSockAddrIn, const WCHAR* pIP, const USHORT port, const DWORD iocpWorkerThreadNum,
+	const DWORD cunCurrentThreadNum, const LONG maxSession, const BYTE packetCode, const BYTE packetFixedKey)
+	:bAutoReconnect_{ bAutoReconnect }, autoReconnectCnt_{ autoReconnectCnt }, autoReconnectInterval_{ autoReconnectInterval }, IOCP_WORKER_THREAD_NUM_{ iocpWorkerThreadNum }, IOCP_ACTIVE_THREAD_NUM_{ cunCurrentThreadNum }, maxSession_{ maxSession },
+	pSessionArr_{ new NetClientSession[maxSession] }, hIOCPWorkerThreadArr_{ new HANDLE[iocpWorkerThreadNum] }, hcp_{ CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, cunCurrentThreadNum) }
 {
 	timeBeginPeriod(1);
-	std::locale::global(std::locale(""));
-	char* pStart;
-	char* pEnd;
 
 	WSADATA wsaData;
 	WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -244,56 +246,28 @@ NetClient::NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, con
 	ASSERT_LOG(WsaIoctlWrapper(dummySock, WSAID_CONNECTEX, (LPVOID*)&lpfnConnectExPtr_) == false, L"WSAIoCtl ConnectEx Failed");
 	closesocket(dummySock);
 
-	PARSER psr = CreateParser(pConfigFileName);
-	WCHAR ipStr[16];
-	GetValue(psr, L"BIND_IP", (PVOID*)&pStart, (PVOID*)&pEnd);
-	unsigned long long stringLen = (pEnd - pStart) / sizeof(WCHAR);
-	wcsncpy_s(ipStr, _countof(ipStr) - 1, (const WCHAR*)pStart, stringLen);
-	// Null terminated String 으로 끝내야 InetPtonW쓸수잇음
-	ipStr[stringLen] = 0;
+	if (bUseMemberSockAddrIn)
+	{
+		// sockAddr_ 초기화, ConnectEx에서 사용
+		ZeroMemory(&sockAddr_, sizeof(sockAddr_));
+		sockAddr_.sin_family = AF_INET;
+		InetPtonW(AF_INET, pIP, &sockAddr_.sin_addr);
+		sockAddr_.sin_port = htons(port);
+	}
 
-	// sockAddr_ 초기화, ConnectEx에서 사용
-	ZeroMemory(&sockAddr_, sizeof(sockAddr_));
-	sockAddr_.sin_family = AF_INET;
-	InetPtonW(AF_INET, ipStr, &sockAddr_.sin_addr);
+	Packet::PACKET_CODE = packetCode;
+	Packet::FIXED_KEY = packetFixedKey;
 
-	GetValue(psr, L"BIND_PORT", (PVOID*)&pStart, nullptr);
-	unsigned short SERVER_PORT = (unsigned short)_wtoi((LPCWSTR)pStart);
-	sockAddr_.sin_port = htons(SERVER_PORT);
-
-	GetValue(psr, L"IOCP_WORKER_THREAD", (PVOID*)&pStart, nullptr);
-	IGNORE_CONST(IOCP_WORKER_THREAD_NUM_) = (DWORD)_wtoi((LPCWSTR)pStart);
-
-	GetValue(psr, L"IOCP_ACTIVE_THREAD", (PVOID*)&pStart, nullptr);
-	IGNORE_CONST(IOCP_ACTIVE_THREAD_NUM_) = (DWORD)_wtoi((LPCWSTR)pStart);
-
-	GetValue(psr, L"IS_ZERO_BYTE_SEND", (PVOID*)&pStart, nullptr);
-	int bZeroByteSend = _wtoi((LPCWSTR)pStart);
-
-	GetValue(psr, L"SESSION_MAX", (PVOID*)&pStart, nullptr);
-	IGNORE_CONST(maxSession_) = _wtoi((LPCWSTR)pStart);
-
-	GetValue(psr, L"PACKET_CODE", (PVOID*)&pStart, nullptr);
-	Packet::PACKET_CODE = (unsigned char)_wtoi((LPCWSTR)pStart);
-
-	GetValue(psr, L"PACKET_KEY", (PVOID*)&pStart, nullptr);
-	Packet::FIXED_KEY = (unsigned char)_wtoi((LPCWSTR)pStart);
-	ReleaseParser(psr);
-
-	// IOCP 핸들 생성
-	hcp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, IOCP_ACTIVE_THREAD_NUM_);
+	// IOCP 핸들 검사 
 	ASSERT_LOG(hcp_ == NULL, L"CreateIoCompletionPort Fail");
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"Create IOCP OK!");
 
 	// 상위 17비트를 못쓰고 상위비트가 16개 이하가 되는날에는 뻑나라는 큰그림이다.
 	ASSERT_FALSE_LOG(CAddressTranslator::CheckMetaCntBits(), L"LockFree 17bits Over");
 
-	pSessionArr_ = new NetClientSession[maxSession_];
 	for (int i = maxSession_ - 1; i >= 0; --i)
 		DisconnectStack_.Push(i);
 
-	// IOCP 워커스레드 생성(CREATE_SUSPENDED)
-	hIOCPWorkerThreadArr_ = new HANDLE[IOCP_WORKER_THREAD_NUM_];
 	for (DWORD i = 0; i < IOCP_WORKER_THREAD_NUM_; ++i)
 	{
 		hIOCPWorkerThreadArr_[i] = (HANDLE)_beginthreadex(NULL, 0, IOCPWorkerThread, this, CREATE_SUSPENDED, nullptr);
@@ -301,6 +275,79 @@ NetClient::NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, con
 	}
 	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE IOCP WorkerThread OK Num : %u!", IOCP_WORKER_THREAD_NUM_);
 }
+
+//NetClient::NetClient(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFileName)
+//	:bAutoReconnect_{ bAutoReconnect }, autoReconnectCnt_{ autoReconnectCnt }, autoReconnectInterval_{ autoReconnectInterval }
+//{
+//	timeBeginPeriod(1);
+//	std::locale::global(std::locale(""));
+//	char* pStart;
+//	char* pEnd;
+//
+//	WSADATA wsaData;
+//	WSAStartup(MAKEWORD(2, 2), &wsaData);
+//
+//	SOCKET dummySock = socket(AF_INET, SOCK_STREAM, 0);
+//	ASSERT_LOG(WsaIoctlWrapper(dummySock, WSAID_CONNECTEX, (LPVOID*)&lpfnConnectExPtr_) == false, L"WSAIoCtl ConnectEx Failed");
+//	closesocket(dummySock);
+//
+//	PARSER psr = CreateParser(pConfigFileName);
+//	WCHAR ipStr[16];
+//	GetValue(psr, L"BIND_IP", (PVOID*)&pStart, (PVOID*)&pEnd);
+//	unsigned long long stringLen = (pEnd - pStart) / sizeof(WCHAR);
+//	wcsncpy_s(ipStr, _countof(ipStr) - 1, (const WCHAR*)pStart, stringLen);
+//	// Null terminated String 으로 끝내야 InetPtonW쓸수잇음
+//	ipStr[stringLen] = 0;
+//
+//	// sockAddr_ 초기화, ConnectEx에서 사용
+//	ZeroMemory(&sockAddr_, sizeof(sockAddr_));
+//	sockAddr_.sin_family = AF_INET;
+//	InetPtonW(AF_INET, ipStr, &sockAddr_.sin_addr);
+//
+//	GetValue(psr, L"BIND_PORT", (PVOID*)&pStart, nullptr);
+//	unsigned short SERVER_PORT = (unsigned short)_wtoi((LPCWSTR)pStart);
+//	sockAddr_.sin_port = htons(SERVER_PORT);
+//
+//	GetValue(psr, L"IOCP_WORKER_THREAD", (PVOID*)&pStart, nullptr);
+//	IGNORE_CONST(IOCP_WORKER_THREAD_NUM_) = (DWORD)_wtoi((LPCWSTR)pStart);
+//
+//	GetValue(psr, L"IOCP_ACTIVE_THREAD", (PVOID*)&pStart, nullptr);
+//	IGNORE_CONST(IOCP_ACTIVE_THREAD_NUM_) = (DWORD)_wtoi((LPCWSTR)pStart);
+//
+//	GetValue(psr, L"IS_ZERO_BYTE_SEND", (PVOID*)&pStart, nullptr);
+//	int bZeroByteSend = _wtoi((LPCWSTR)pStart);
+//
+//	GetValue(psr, L"SESSION_MAX", (PVOID*)&pStart, nullptr);
+//	IGNORE_CONST(maxSession_) = _wtoi((LPCWSTR)pStart);
+//
+//	GetValue(psr, L"PACKET_CODE", (PVOID*)&pStart, nullptr);
+//	Packet::PACKET_CODE = (unsigned char)_wtoi((LPCWSTR)pStart);
+//
+//	GetValue(psr, L"PACKET_KEY", (PVOID*)&pStart, nullptr);
+//	Packet::FIXED_KEY = (unsigned char)_wtoi((LPCWSTR)pStart);
+//	ReleaseParser(psr);
+//
+//	// IOCP 핸들 생성
+//	hcp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, IOCP_ACTIVE_THREAD_NUM_);
+//	ASSERT_LOG(hcp_ == NULL, L"CreateIoCompletionPort Fail");
+//	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"Create IOCP OK!");
+//
+//	// 상위 17비트를 못쓰고 상위비트가 16개 이하가 되는날에는 뻑나라는 큰그림이다.
+//	ASSERT_FALSE_LOG(CAddressTranslator::CheckMetaCntBits(), L"LockFree 17bits Over");
+//
+//	pSessionArr_ = new NetClientSession[maxSession_];
+//	for (int i = maxSession_ - 1; i >= 0; --i)
+//		DisconnectStack_.Push(i);
+//
+//	// IOCP 워커스레드 생성(CREATE_SUSPENDED)
+//	hIOCPWorkerThreadArr_ = new HANDLE[IOCP_WORKER_THREAD_NUM_];
+//	for (DWORD i = 0; i < IOCP_WORKER_THREAD_NUM_; ++i)
+//	{
+//		hIOCPWorkerThreadArr_[i] = (HANDLE)_beginthreadex(NULL, 0, IOCPWorkerThread, this, CREATE_SUSPENDED, nullptr);
+//		ASSERT_ZERO_LOG(hIOCPWorkerThreadArr_[i], L"MAKE WorkerThread Fail");
+//	}
+//	LOG(L"ONOFF", SYSTEM, TEXTFILE, L"MAKE IOCP WorkerThread OK Num : %u!", IOCP_WORKER_THREAD_NUM_);
+//}
 
 NetClient::~NetClient()
 {
@@ -415,14 +462,15 @@ bool NetClient::ConnectPost(bool bRetry, NetClientSession* pSession, SOCKADDR_IN
 	SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
 	SetClientBind(sock);
 	SetZeroCopy(sock);
-	SetLinger(sock);
+	//SetLinger(sock);
+
 	if (NULL == CreateIoCompletionPort((HANDLE)sock, hcp_, (ULONG_PTR)pSession, 0))
 	{
 		DWORD errCode = WSAGetLastError();
 		__debugbreak();
 	}
-	pSession->sock_ = sock;
 
+	pSession->sock_ = sock;
 	ZeroMemory(&pSession->connectOverlapped.overlapped, sizeof(WSAOVERLAPPED));
 	pSession->connectOverlapped.why = OVERLAPPED_REASON::CONNECT;
 	BOOL bConnectExRet = lpfnConnectExPtr_(sock, (SOCKADDR*)pSockAddrIn, sizeof(SOCKADDR_IN), nullptr, 0, NULL, &pSession->connectOverlapped.overlapped);
@@ -452,6 +500,10 @@ bool NetClient::ConnectPost(bool bRetry, NetClientSession* pSession, SOCKADDR_IN
 		LOG(L"ERROR", ERR, TEXTFILE, L"ConnectEx ErrCode : %u", errCode);
 		__debugbreak();
 		return false;
+	}
+	else
+	{
+		__debugbreak();
 	}
 	return true;
 }

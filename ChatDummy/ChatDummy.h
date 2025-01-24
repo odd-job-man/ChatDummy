@@ -4,7 +4,7 @@
 class ChatDummy : public NetClient
 {
 public:
-	ChatDummy(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconInterval, const WCHAR* pConfigFile);
+	ChatDummy(BOOL bAutoReconnect, LONG autoReconnectCnt, LONG autoReconnectInterval, BOOL bUseMemberSockAddrIn, WCHAR* pIP, USHORT port, DWORD iocpWorkerThreadNum, DWORD cunCurrentThreadNum, LONG maxSession, BYTE packetCode, BYTE packetFixedKey);
 	BOOL Start();
 	virtual void OnRecv(ULONGLONG id, SmartPacket& sp) override;
 	virtual void OnError(ULONGLONG id, int errorType, Packet* pRcvdPacket) override;
@@ -12,6 +12,4 @@ public:
 	virtual void OnRelease(ULONGLONG id) override;
 	virtual void OnConnectFailed(ULONGLONG id) override;
 	virtual void OnAutoResetAllFailed() override;
-
-	const WCHAR* pConfigFile_;
 };

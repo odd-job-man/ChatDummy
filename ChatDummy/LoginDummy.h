@@ -5,7 +5,8 @@
 class LoginDummy : public NetClient
 {
 public:
-	LoginDummy(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFile);
+	LoginDummy(BOOL bAutoReconnect, LONG autoReconnectCnt, const LONG autoReconnectInterval, BOOL bUseMemberSockAddrIn, WCHAR* pIP, USHORT port, DWORD iocpWorkerThreadNum, DWORD cuncurrentThreadNum,
+		LONG maxSession, BYTE packetCode, BYTE packetFixedKey);
 	BOOL Start();
 	~LoginDummy();
 	virtual void OnRecv(ULONGLONG id, SmartPacket& sp) override;
@@ -14,7 +15,5 @@ public:
 	virtual void OnRelease(ULONGLONG id) override;
 	virtual void OnConnectFailed(ULONGLONG id) override;
 	virtual void OnAutoResetAllFailed() override;
-	const WCHAR* pConfigFile_;
-	ChatDummy* pChatDummy_;
 	int LoginConnectFailed_ = 0;
 };
