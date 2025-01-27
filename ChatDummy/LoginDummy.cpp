@@ -14,10 +14,6 @@ LoginDummy::LoginDummy(BOOL bAutoReconnect, LONG autoReconnectCnt, LONG autoReco
 {
 }
 
-//LoginDummy::LoginDummy(const BOOL bAutoReconnect, const LONG autoReconnectCnt, const LONG autoReconnectInterval, const WCHAR* pConfigFile)
-//	:NetClient{ bAutoReconnect,autoReconnectCnt,autoReconnectInterval,pConfigFile }, pConfigFile_{ pConfigFile }
-//{
-//}
 
 BOOL LoginDummy::Start()
 {
