@@ -1,5 +1,5 @@
 #pragma once
-enum class SERVERTYPE
+enum class SERVERTYPE : BYTE
 {
 	LOGIN,
 	CHAT

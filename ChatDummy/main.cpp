@@ -17,8 +17,8 @@ int main()
 	g_pLoginDummy = new LoginDummy
 	{ 
 		TRUE,
-		5,
-		100,
+		2,
+		1000,
 		TRUE,
 		ip,
 		(USHORT)GetValueINT(psr,L"LOGIN_SERVER_PORT"),

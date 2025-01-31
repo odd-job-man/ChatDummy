@@ -1,5 +1,5 @@
 #pragma once
-enum class STATE
+enum class STATE : BYTE
 {
 	LOGIN_CONNECT_SUCCESS,
 	CS_LOGIN_REQ_LOGIN_SENT,

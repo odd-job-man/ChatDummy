@@ -34,8 +34,6 @@ void NetClient::ConnectProc(NetClientSession* pSession)
 	if (0 > setsockopt(pSession->sock_, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0))
 		__debugbreak();
 
-	//SetLinger(pSession->sock_);
-	//SetZeroCopy(pSession->sock_);
 	pSession->Init(InterlockedIncrement(&ullIdCounter_) - 1, (short)(pSession - pSessionArr_));
 
 	OnConnect(pSession->id_);
@@ -389,7 +387,7 @@ bool NetClient::ConnectPost(bool bRetry, NetClientSession* pSession, SOCKADDR_IN
 	SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
 	SetClientBind(sock);
 	SetZeroCopy(sock);
-	//SetLinger(sock);
+	SetLinger(sock);
 
 	if (NULL == CreateIoCompletionPort((HANDLE)sock, hcp_, (ULONG_PTR)pSession, 0))
 	{
