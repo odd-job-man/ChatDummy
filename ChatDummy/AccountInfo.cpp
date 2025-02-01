@@ -5,7 +5,6 @@
 
 static AccountInfo g_AccountInfo[AccountInfo::MaxAccount];
 
-
 void AccountInfo::Init(const WCHAR* pConfigFile)
 {
 	pool_ = CreateMemoryPool(sizeof(AccountInfo), MaxAccount);

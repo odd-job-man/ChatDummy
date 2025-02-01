@@ -11,10 +11,12 @@ struct AccountInfo
 
 	static constexpr int MaxAccount = 5001;
 	static void Init(const WCHAR* pConfigFile);
+
 	__forceinline static const AccountInfo* Alloc()
 	{
 		return (AccountInfo*)AllocMemoryFromPool(pool_);
 	}
+
 private:
 	static inline MEMORYPOOL pool_;
 };

@@ -11,6 +11,20 @@ ChatDummy* g_pChatDummy;
 
 int main()
 {
+	printf(
+		"Select ID LIST\n\n"
+		"Index 1 - ID1.txt\n"
+		"Index 2 - ID2.txt\n"
+		"Index 3 - ID3.txt\n"
+		"Index 4 - ID4.txt\n\n"
+		"Select Index Number... "
+	);
+
+	int idx;
+	scanf_s("%d", &idx);
+	WCHAR idFile[MAX_PATH];
+	swprintf_s(idFile, MAX_PATH, L"ID%d.txt", idx);
+
 	PARSER psr = CreateParser(L"DummyConfig.txt");
 	WCHAR ip[16];
 	GetValueWSTR(psr, ip, _countof(ip), L"LOGIN_SERVER_IP");
@@ -54,6 +68,7 @@ int main()
 	ReleaseParser(psr);
 	g_pLoginDummy->Start();
 	g_pChatDummy->Start();
-	UpdateLoop(maxSession, randConnect, randDisconnect, randContents, delayAction, delayLogin, L"ID1.txt", L"ChatList.txt");
+
+	UpdateLoop(maxSession, randConnect, randDisconnect, randContents, delayAction, delayLogin, idFile, L"ChatList.txt");
 	return 0;
 }

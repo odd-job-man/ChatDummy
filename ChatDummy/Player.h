@@ -52,6 +52,7 @@ struct Player
 	BYTE field_;
 	STATE state_;
 	bool bDuplicateNew_; // 이중로그인 상황에서 새로접속하는 클라임을 나타내는 플래그
+	ULONGLONG duplicateVictimSessionId_;
 	ULONGLONG sessionId_;
 	DWORD lastRecvTime_;
 	DWORD lastSendTime_; // RTT 측정용

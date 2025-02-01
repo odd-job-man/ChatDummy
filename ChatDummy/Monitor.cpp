@@ -50,6 +50,7 @@ extern DWORD g_loginTimeOutNum;
 
 extern DWORD g_sessionTimeOutTotal;
 extern DWORD g_sessionTimeOutNum;
+extern int g_duplicateConnectFail;
 
 void MonitorInit()
 {
@@ -111,14 +112,14 @@ void Monitor()
 		"------------------------------------------------------------\n"
 		"Action Delay Min : %6u ms\n"
 		"Action Delay Max : %6u ms\n"
-		"Action Delay Avr : %4.2f ms\n"
+		"Action Delay Avr : %6.2f ms\n"
 		"------------------------------------------------------------\n"
-		"Duplicate Login Client Num : %6d\n"
+		"Duplicate Login Client Num : %6d, Duplicate Connect Fail : %d\n"
 		"Session Timeout Client Num : %6d\n"
 		"  Login Timeout Client Num : %6d\n"
 		"------------------------------------------------------------\n"
-		"Session Timeout Time Avg : %4.2f\n"
-		"  Login Timeout Time Avg : %4.2f\n"
+		"Session Timeout Time Avg : %6.2f ms\n"
+		"  Login Timeout Time Avg : %6.2f ms\n"
 		"------------------------------------------------------------\n",
 		g_StartTimeArr,
 		g_loopNum,
@@ -137,7 +138,7 @@ void Monitor()
 		g_rttMin,
 		g_rttMax,
 		(g_rttNum == 0) ? 0 : (g_rttTotal / (float)g_rttNum),
-		g_duplicateLoginTPS,
+		g_duplicateLoginTPS,g_duplicateConnectFail,
 		g_sessionTimeOutTPS,
 		g_loginTimeOutTPS,
 		(g_sessionTimeOutNum == 0) ? 0 : (g_sessionTimeOutTotal / (float)g_sessionTimeOutNum),

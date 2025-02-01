@@ -34,6 +34,8 @@ int g_loginConnectTotal;
 int g_loginDownClient;
 int g_loginConnectFail;
 
+int g_duplicateConnectFail;
+
 int g_chatConnectTotal;
 int g_chatDownClient;
 int g_chatConnectFail;
@@ -285,13 +287,6 @@ void Update()
 		if (pPlayer->state_ != STATE::CHAT_CONNECT_SUCCESS && pPlayer->state_ != STATE::CS_CHAT_REQ_LOGIN_SENT)
 			__debugbreak();
 
-		// 더미클라에서 Disconnect를 호출해도 IOCP에서 비동기적으로 끊기 때문에 끊길 예정인 클라가 아직 Map에 존재할수잇음, Chat Connect에서는 SESSION_TIMEOUT_TARGET을 제외하고는 존재 불가능, 나중 제거 대상
-		if ((pPlayer->field_ & DISCONNECT_TARGET) == DISCONNECT_TARGET)
-		{
-			if ((pPlayer->field_ & SESSION_TIMEOUT_TARGET) == 0) 
-				__debugbreak();
-		}
-
 		if ((pPlayer->field_ & SESSION_TIMEOUT_TARGET) == SESSION_TIMEOUT_TARGET) // 로그인 요청 패킷 보내지 않고 세션상태를 유지하는 악성유저에 대해서 타임아웃 테스트 중이라면 건너뜀
 			continue;
 
@@ -314,10 +309,6 @@ void Update()
 	for (auto pair : g_chatLoginPlayerMap)
 	{
 		Player* pPlayer = pair.second;
-
-
-		if ((pPlayer->field_ & SESSION_TIMEOUT_TARGET) == SESSION_TIMEOUT_TARGET) // 제거예정
-			__debugbreak();
 
 		switch (pPlayer->state_)
 		{
@@ -610,14 +601,21 @@ void RecvChatJob(RecvJob* pJob)
 		break;
 	}
 	case JOBTYPE::CONNECT_FAIL:
+	{
 		++g_chatConnectFail;
 		break;
+	}
 
 	case JOBTYPE::ALL_RECONNECT_FAIL: //  채팅서버로의 재접속이 일정횟수 실패시 
 	{
 		++g_disconnectedNum;
 		Player* pPlayer = g_moveQ.front();
 		g_moveQ.pop();
+		if (pPlayer->bDuplicateNew_)
+		{
+			++g_duplicateConnectFail;
+		}
+
 		g_NonConnectedStack.push(pPlayer->pInfo_);
 		RetMemoryToPool(g_playerPool, pPlayer);
 		break;
@@ -642,9 +640,6 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 	}
 
 	Player* pPlayer = iter->second;
-
-	if ((pPlayer->field_ & SESSION_TIMEOUT_TARGET) == SESSION_TIMEOUT_TARGET) // 제거예정
-		__debugbreak();
 
 	WORD type;
 	*pPacket >> type;
@@ -702,9 +697,6 @@ void RecvChatMessage(Packet* pPacket, ULONGLONG sessionID)
 			LOG(L"ERROR", ERR, TEXTFILE, L"Call Disconnect But Recv RES_SECTOR_MOVE");
 			__debugbreak();
 		}
-
-		if ((pPlayer->field_ & LOGIN_TIMOUT_TARGET) == LOGIN_TIMOUT_TARGET)
-			__debugbreak();
 
 		if (pPlayer->state_ != STATE::CS_CHAT_REQ_SECTOR_MOVE_SENT)
 		{
